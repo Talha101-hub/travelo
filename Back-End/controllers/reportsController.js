@@ -2,6 +2,7 @@ const Trip = require('../models/Trip');
 const Driver = require('../models/Driver');
 const Vendor = require('../models/Vendor');
 const CarMaintenance = require('../models/CarMaintenance');
+const DriverTempDetails = require('../models/DriverTempDetails');
 
 // Helper function to get date range based on period
 const getDateRange = (period) => {
@@ -204,14 +205,24 @@ const getExpenseReports = async (dateRange) => {
       $group: {
         _id: null,
         totalSalary: { $sum: '$driverSalary' },
-        totalMealExpenses: { $sum: '$driverMeal' },
-        totalRoomRent: { $sum: '$roomRent' },
-        totalFurtherExpenses: { $sum: '$furtherExpense' },
-        totalTempExpenses: {
-          $sum: {
-            $add: ['$driverMeal', '$roomRent', '$furtherExpense']
-          }
-        }
+        totalTempExpenses: { $sum: 0 } // These are now in DriverTempDetails
+      }
+    }
+  ]);
+
+  // Driver temporary expenses
+  const driverTempExpenses = await DriverTempDetails.aggregate([
+    {
+      $match: {
+        createdAt: { $gte: dateRange.start, $lte: dateRange.end }
+      }
+    },
+    {
+      $group: {
+        _id: null,
+        totalTempExpenses: { $sum: '$totalExpense' },
+        avgTempExpenses: { $avg: '$totalExpense' },
+        tempExpenseCount: { $sum: 1 }
       }
     }
   ]);
@@ -220,7 +231,8 @@ const getExpenseReports = async (dateRange) => {
   const maintenanceExpenses = await CarMaintenance.aggregate([
     {
       $match: {
-        maintenanceDate: { $gte: dateRange.start, $lte: dateRange.end }
+        maintenanceDate: { $gte: dateRange.start, $lte: dateRange.end },
+        status: 'completed' // Only count completed maintenance as actual expense
       }
     },
     {
@@ -247,11 +259,19 @@ const getExpenseReports = async (dateRange) => {
     }
   ]);
 
-  return {
+  const result = {
     driverExpenses: driverExpenses[0] || {},
+    driverTempExpenses: driverTempExpenses[0] || {},
     maintenanceExpenses: maintenanceExpenses[0] || {},
     vendorPayments: vendorPayments[0] || {}
   };
+  
+  console.log('Expense Reports Debug:', {
+    maintenanceExpenses: result.maintenanceExpenses,
+    dateRange: dateRange
+  });
+  
+  return result;
 };
 
 // @desc    Get driver reports
@@ -399,7 +419,8 @@ const getMaintenanceReports = async (dateRange) => {
   const maintenanceStats = await CarMaintenance.aggregate([
     {
       $match: {
-        maintenanceDate: { $gte: dateRange.start, $lte: dateRange.end }
+        maintenanceDate: { $gte: dateRange.start, $lte: dateRange.end },
+        status: 'completed' // Only count completed maintenance
       }
     },
     {
@@ -425,7 +446,8 @@ const getMaintenanceReports = async (dateRange) => {
   const maintenanceByCar = await CarMaintenance.aggregate([
     {
       $match: {
-        maintenanceDate: { $gte: dateRange.start, $lte: dateRange.end }
+        maintenanceDate: { $gte: dateRange.start, $lte: dateRange.end },
+        status: 'completed' // Only count completed maintenance
       }
     },
     {
@@ -442,10 +464,17 @@ const getMaintenanceReports = async (dateRange) => {
     { $sort: { maintenanceCount: -1 } }
   ]);
 
-  return {
+  const result = {
     ...maintenanceStats[0],
     maintenanceByCar
   };
+  
+  console.log('Maintenance Reports Debug:', {
+    maintenanceStats: result,
+    dateRange: dateRange
+  });
+  
+  return result;
 };
 
 // @desc    Get summary dashboard data
@@ -469,7 +498,7 @@ const getDashboardData = async (req, res) => {
     // Recent trips
     const recentTrips = await Trip.find()
       .populate('driver', 'name')
-      .populate('vendor', 'name')
+      .populate('vendors', 'name')
       .sort({ createdAt: -1 })
       .limit(5)
       .select('startingPlace destination budget status createdAt');

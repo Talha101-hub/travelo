@@ -27,7 +27,8 @@ const mainNavigation = [
 ];
 
 const managementNavigation = [
-  { name: "Drivers", href: "/drivers", icon: Users },
+  { name: "Driver Details", href: "/drivers", icon: Users },
+  { name: "Driver Temp Details", href: "/driver-temp-details", icon: Car },
   { name: "Vendors", href: "/vendors", icon: Building2 },
   { name: "Car Maintenance", href: "/maintenance", icon: Wrench },
 ];

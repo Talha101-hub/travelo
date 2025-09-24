@@ -1,4 +1,17 @@
-const { body, param, query } = require('express-validator');
+const { body, param, query, validationResult } = require('express-validator');
+
+// Middleware to handle validation errors
+const handleValidationErrors = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors: errors.array()
+    });
+  }
+  next();
+};
 
 // Driver validation rules
 const validateDriver = [
@@ -35,6 +48,13 @@ const validateDriver = [
     .withMessage('Driver salary must be a number')
     .isFloat({ min: 0 })
     .withMessage('Salary cannot be negative'),
+  
+  body('vendorIds')
+    .isArray({ min: 1 })
+    .withMessage('At least one vendor must be selected'),
+  body('vendorIds.*')
+    .isMongoId()
+    .withMessage('Each vendor ID must be valid'),
   
   body('driverMeal')
     .optional()
@@ -154,9 +174,12 @@ const validateTrip = [
     .isMongoId()
     .withMessage('Driver must be a valid ObjectId'),
   
-  body('vendor')
+  body('vendors')
+    .isArray({ min: 1 })
+    .withMessage('At least one vendor must be selected'),
+  body('vendors.*')
     .isMongoId()
-    .withMessage('Vendor must be a valid ObjectId'),
+    .withMessage('Each vendor must be a valid ObjectId'),
   
   body('carNumber')
     .trim()
@@ -333,6 +356,39 @@ const validateLogin = [
     .withMessage('Password is required')
 ];
 
+// Driver temp details validation rules
+const validateDriverTempDetails = [
+  body('driverId')
+    .isMongoId()
+    .withMessage('Please provide a valid driver ID'),
+  body('driverMeal')
+    .isNumeric()
+    .withMessage('Driver meal expense must be a number')
+    .isFloat({ min: 0 })
+    .withMessage('Driver meal expense cannot be negative'),
+  body('roomRent')
+    .isNumeric()
+    .withMessage('Room rent must be a number')
+    .isFloat({ min: 0 })
+    .withMessage('Room rent cannot be negative'),
+  body('furtherExpense')
+    .isNumeric()
+    .withMessage('Further expense must be a number')
+    .isFloat({ min: 0 })
+    .withMessage('Further expense cannot be negative'),
+  body('month')
+    .isIn(['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'])
+    .withMessage('Please provide a valid month'),
+  body('year')
+    .isInt({ min: 2020, max: 2030 })
+    .withMessage('Year must be between 2020 and 2030'),
+  body('status')
+    .optional()
+    .isIn(['pending', 'approved', 'rejected'])
+    .withMessage('Status must be pending, approved, or rejected'),
+  handleValidationErrors
+];
+
 module.exports = {
   validateDriver,
   validateVendor,
@@ -343,5 +399,6 @@ module.exports = {
   validateStatus,
   validateReportQuery,
   validateUser,
-  validateLogin
+  validateLogin,
+  validateDriverTempDetails
 };

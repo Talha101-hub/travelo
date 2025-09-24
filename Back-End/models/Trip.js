@@ -27,11 +27,10 @@ const tripSchema = new mongoose.Schema({
     ref: 'Driver',
     required: [true, 'Driver is required']
   },
-  vendor: {
+  vendors: [{
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Vendor',
-    required: [true, 'Vendor is required']
-  },
+    ref: 'Vendor'
+  }],
   carNumber: {
     type: String,
     required: [true, 'Car number is required'],

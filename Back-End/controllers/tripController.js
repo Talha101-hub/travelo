@@ -38,7 +38,7 @@ const getTrips = async (req, res) => {
 
     const trips = await Trip.find(query)
       .populate('driver', 'name carNumber akamaNumber')
-      .populate('vendor', 'name email phone')
+      .populate('vendors', 'name email phone')
       .sort({ tripDate: -1 })
       .select('-__v');
 
@@ -64,7 +64,7 @@ const getTrip = async (req, res) => {
   try {
     const trip = await Trip.findById(req.params.id)
       .populate('driver', 'name carNumber akamaNumber driverSalary')
-      .populate('vendor', 'name email phone payments paymentAsked')
+      .populate('vendors', 'name email phone')
       .select('-__v');
 
     if (!trip) {
@@ -103,10 +103,9 @@ const createTrip = async (req, res) => {
       });
     }
 
-    // Verify driver and vendor exist
+    // Verify driver and vendors exist
     const driver = await Driver.findById(req.body.driver);
-    const vendor = await Vendor.findById(req.body.vendor);
-
+    
     if (!driver) {
       return res.status(400).json({
         success: false,
@@ -114,11 +113,15 @@ const createTrip = async (req, res) => {
       });
     }
 
-    if (!vendor) {
-      return res.status(400).json({
-        success: false,
-        message: 'Vendor not found'
-      });
+    // Verify all vendors exist
+    if (req.body.vendors && req.body.vendors.length > 0) {
+      const vendors = await Vendor.find({ _id: { $in: req.body.vendors } });
+      if (vendors.length !== req.body.vendors.length) {
+        return res.status(400).json({
+          success: false,
+          message: 'One or more vendors not found'
+        });
+      }
     }
 
     // Check if driver is available (not on another ongoing trip)
@@ -136,10 +139,22 @@ const createTrip = async (req, res) => {
 
     const trip = await Trip.create(req.body);
 
+    // Auto-update driver's vendor list with new vendors from this trip
+    if (req.body.vendors && req.body.vendors.length > 0) {
+      await Driver.findByIdAndUpdate(
+        req.body.driver,
+        {
+          $addToSet: { vendorIds: { $each: req.body.vendors } }
+        },
+        { new: true }
+      );
+      console.log(`Auto-linked driver ${req.body.driver} to vendors: ${req.body.vendors.join(', ')}`);
+    }
+
     // Populate the created trip
     const populatedTrip = await Trip.findById(trip._id)
       .populate('driver', 'name carNumber akamaNumber')
-      .populate('vendor', 'name email phone');
+      .populate('vendors', 'name email phone');
 
     res.status(201).json({
       success: true,
@@ -171,13 +186,16 @@ const updateTrip = async (req, res) => {
       });
     }
 
+    // Get the original trip to check if status changed
+    const originalTrip = await Trip.findById(req.params.id);
+    
     const trip = await Trip.findByIdAndUpdate(
       req.params.id,
       req.body,
       { new: true, runValidators: true }
     )
     .populate('driver', 'name carNumber akamaNumber')
-    .populate('vendor', 'name email phone')
+    .populate('vendors', 'name email phone')
     .select('-__v');
 
     if (!trip) {
@@ -185,6 +203,45 @@ const updateTrip = async (req, res) => {
         success: false,
         message: 'Trip not found'
       });
+    }
+
+    // Auto-update driver's vendor list with new vendors from this trip update
+    if (req.body.vendors && req.body.vendors.length > 0 && trip.driver) {
+      await Driver.findByIdAndUpdate(
+        trip.driver._id,
+        {
+          $addToSet: { vendorIds: { $each: req.body.vendors } }
+        },
+        { new: true }
+      );
+      console.log(`Auto-linked driver ${trip.driver._id} to vendors: ${req.body.vendors.join(', ')}`);
+    }
+
+    // Emit socket events if status changed
+    const io = req.app.get('io');
+    if (io && originalTrip && originalTrip.status !== trip.status) {
+      io.to('trips').emit('trip:updated', trip);
+      
+      // If trip is completed, emit driver update event
+      if (trip.status === 'complete' && trip.driver) {
+        // Get updated driver with trip count
+        const driver = await Driver.findById(trip.driver._id)
+          .populate('vendorIds', 'name contactPerson');
+        
+        const completedTrips = await Trip.countDocuments({ 
+          driver: trip.driver._id, 
+          status: 'complete' 
+        });
+        
+        const driverWithStats = {
+          ...driver.toObject(),
+          completedTrips
+        };
+        
+        console.log(`Emitting driver:updated event for driver ${trip.driver._id} with ${completedTrips} completed trips`);
+        io.to('drivers').emit('driver:updated', driverWithStats);
+        console.log(`Number of clients in drivers room: ${io.sockets.adapter.rooms.get('drivers')?.size || 0}`);
+      }
     }
 
     res.status(200).json({
@@ -249,13 +306,16 @@ const updateTripStatus = async (req, res) => {
     if (actualCost !== undefined) updateData.actualCost = actualCost;
     if (notes) updateData.notes = notes;
 
+    // Get the original trip to check if status changed
+    const originalTrip = await Trip.findById(req.params.id);
+    
     const trip = await Trip.findByIdAndUpdate(
       req.params.id,
       updateData,
       { new: true, runValidators: true }
     )
     .populate('driver', 'name carNumber akamaNumber')
-    .populate('vendor', 'name email phone')
+    .populate('vendors', 'name email phone')
     .select('-__v');
 
     if (!trip) {
@@ -263,6 +323,35 @@ const updateTripStatus = async (req, res) => {
         success: false,
         message: 'Trip not found'
       });
+    }
+
+    // Emit socket events if status changed
+    const io = req.app.get('io');
+    if (io && originalTrip && originalTrip.status !== trip.status) {
+      console.log(`Trip status changed from ${originalTrip.status} to ${trip.status}`);
+      io.to('trips').emit('trip:updated', trip);
+      
+      // If trip is completed, emit driver update event
+      if (trip.status === 'complete' && trip.driver) {
+        console.log(`Trip completed, updating driver ${trip.driver._id}`);
+        // Get updated driver with trip count
+        const driver = await Driver.findById(trip.driver._id)
+          .populate('vendorIds', 'name contactPerson');
+        
+        const completedTrips = await Trip.countDocuments({ 
+          driver: trip.driver._id, 
+          status: 'complete' 
+        });
+        
+        const driverWithStats = {
+          ...driver.toObject(),
+          completedTrips
+        };
+        
+        console.log(`Emitting driver:updated event for driver ${trip.driver._id} with ${completedTrips} completed trips`);
+        io.to('drivers').emit('driver:updated', driverWithStats);
+        console.log(`Number of clients in drivers room: ${io.sockets.adapter.rooms.get('drivers')?.size || 0}`);
+      }
     }
 
     res.status(200).json({
@@ -287,7 +376,7 @@ const getPendingTrips = async (req, res) => {
   try {
     const trips = await Trip.find({ status: 'pending' })
       .populate('driver', 'name carNumber akamaNumber')
-      .populate('vendor', 'name email phone')
+      .populate('vendors', 'name email phone')
       .sort({ tripDate: 1 })
       .select('-__v');
 
@@ -327,7 +416,7 @@ const getCompletedTrips = async (req, res) => {
 
     const trips = await Trip.find(query)
       .populate('driver', 'name carNumber akamaNumber')
-      .populate('vendor', 'name email phone')
+      .populate('vendors', 'name email phone')
       .sort({ completedAt: -1 })
       .select('-__v');
 
@@ -377,7 +466,7 @@ const getTripStats = async (req, res) => {
     // Get recent trips
     const recentTrips = await Trip.find()
       .populate('driver', 'name')
-      .populate('vendor', 'name')
+      .populate('vendors', 'name')
       .sort({ createdAt: -1 })
       .limit(5)
       .select('startingPlace destination budget status createdAt');

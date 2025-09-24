@@ -13,6 +13,7 @@ const connectDB = require('./config/database');
 // Import routes
 const authRoutes = require('./routes/auth');
 const driverRoutes = require('./routes/drivers');
+const driverTempDetailsRoutes = require('./routes/driverTempDetails');
 const vendorRoutes = require('./routes/vendors');
 const tripRoutes = require('./routes/trips');
 const maintenanceRoutes = require('./routes/maintenance');
@@ -93,6 +94,7 @@ app.get('/health', (req, res) => {
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/drivers', driverRoutes);
+app.use('/api/driver-temp-details', driverTempDetailsRoutes);
 app.use('/api/vendors', vendorRoutes);
 app.use('/api/trips', tripRoutes);
 app.use('/api/maintenance', maintenanceRoutes);
@@ -105,10 +107,12 @@ io.on('connection', (socket) => {
   // Driver events
   socket.on('subscribe:drivers', () => {
     socket.join('drivers');
+    console.log(`Client ${socket.id} subscribed to drivers channel`);
   });
 
   socket.on('unsubscribe:drivers', () => {
     socket.leave('drivers');
+    console.log(`Client ${socket.id} unsubscribed from drivers channel`);
   });
 
   // Vendor events

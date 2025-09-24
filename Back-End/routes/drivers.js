@@ -6,7 +6,8 @@ const {
   createDriver,
   updateDriver,
   deleteDriver,
-  getDriverStats
+  getDriverStats,
+  getDriverTripHistory
 } = require('../controllers/driverController');
 const { validateDriver, validateObjectId } = require('../middleware/validation');
 
@@ -24,6 +25,11 @@ router.get('/stats/overview', getDriverStats);
 // @desc    Get single driver
 // @access  Public
 router.get('/:id', validateObjectId, getDriver);
+
+// @route   GET /api/drivers/:id/trips
+// @desc    Get driver trip history
+// @access  Public
+router.get('/:id/trips', validateObjectId, getDriverTripHistory);
 
 // @route   POST /api/drivers
 // @desc    Create new driver

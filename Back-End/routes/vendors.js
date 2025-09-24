@@ -7,7 +7,8 @@ const {
   updateVendor,
   deleteVendor,
   updateVendorPayment,
-  getVendorStats
+  getVendorStats,
+  getVendorTripHistory
 } = require('../controllers/vendorController');
 const { validateVendor, validateObjectId, validatePayment } = require('../middleware/validation');
 
@@ -25,6 +26,11 @@ router.get('/stats/overview', getVendorStats);
 // @desc    Get single vendor
 // @access  Public
 router.get('/:id', validateObjectId, getVendor);
+
+// @route   GET /api/vendors/:id/trips
+// @desc    Get vendor trip history
+// @access  Public
+router.get('/:id/trips', validateObjectId, getVendorTripHistory);
 
 // @route   POST /api/vendors
 // @desc    Create new vendor

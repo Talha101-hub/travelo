@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Edit, Trash2, Eye } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Eye, ExternalLink, History, MapPin, Calendar, DollarSign } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import api from "@/lib/api";
 import { getSocket } from "@/lib/socket";
 import DriverForm from "@/components/forms/DriverForm";
 import ConfirmDialog from "@/components/ui/confirm-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 
 interface Driver {
@@ -18,6 +21,9 @@ interface Driver {
   carModel: string;
   akamaNumber: string;
   salary: number;
+  vendorIds: string[];
+  vendors?: Array<{ id: string; name: string; contactPerson: string }>;
+  completedTrips?: number;
   status: "active" | "inactive";
 }
 
@@ -25,9 +31,13 @@ export default function Drivers() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isTripHistoryOpen, setIsTripHistoryOpen] = useState(false);
   const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const highlightedDriverRef = useRef<HTMLDivElement>(null);
 
   const { data: drivers = [], isLoading } = useQuery<Driver[]>({
     queryKey: ["drivers", { search: searchTerm }],
@@ -41,14 +51,48 @@ export default function Drivers() {
         carModel: d.carModel,
         akamaNumber: d.akamaNumber,
         salary: d.driverSalary,
+        vendorIds: d.vendorIds?.map((v: any) => v._id || v) || [],
+        vendors: d.activeVendors || [], // Use activeVendors instead of all vendors
+        completedTrips: d.completedTrips || 0,
         status: d.status,
       }));
     },
     staleTime: 15_000,
   });
 
+  const { data: vendors = [] } = useQuery({
+    queryKey: ["vendors"],
+    queryFn: async () => {
+      const res = await api.get("/vendors");
+      return res.data.data || [];
+    },
+  });
+
+  // Query for driver trip history
+  const { data: tripHistory, isLoading: isTripHistoryLoading } = useQuery({
+    queryKey: ["driver-trip-history", selectedDriver?.id],
+    queryFn: async () => {
+      if (!selectedDriver?.id) return null;
+      const res = await api.get(`/drivers/${selectedDriver.id}/trips`);
+      return res.data.data;
+    },
+    enabled: !!selectedDriver?.id && isTripHistoryOpen,
+  });
+
   useEffect(() => {
     const socket = getSocket();
+    
+    // Ensure socket is connected before subscribing
+    if (socket.connected) {
+      socket.emit('subscribe:drivers');
+      console.log('Subscribed to drivers channel');
+    } else {
+      socket.on('connect', () => {
+        socket.emit('subscribe:drivers');
+        console.log('Subscribed to drivers channel after connect');
+      });
+    }
+    
     const handleCreated = (driver: any) => {
       queryClient.setQueryData<Driver[] | undefined>(["drivers", { search: searchTerm }], (old) => {
         if (!old) return old;
@@ -65,6 +109,7 @@ export default function Drivers() {
       });
     };
     const handleUpdated = (driver: any) => {
+      console.log('Driver updated via socket:', driver);
       queryClient.setQueryData<Driver[] | undefined>(["drivers", { search: searchTerm }], (old) => old?.map(d => d.id === driver._id ? { 
         ...d, 
         name: driver.name,
@@ -73,6 +118,9 @@ export default function Drivers() {
         akamaNumber: driver.akamaNumber,
         salary: driver.driverSalary,
         status: driver.status,
+        vendorIds: driver.vendorIds?.map((v: any) => v._id || v) || [],
+        vendors: driver.vendorIds || [],
+        completedTrips: driver.completedTrips || 0,
         id: driver._id 
       } : d));
     };
@@ -82,12 +130,54 @@ export default function Drivers() {
     socket.on("driver:created", handleCreated);
     socket.on("driver:updated", handleUpdated);
     socket.on("driver:deleted", handleDeleted);
+    // Re-subscribe every 30 seconds to ensure connection stays active
+    const reSubscribeInterval = setInterval(() => {
+      if (socket.connected) {
+        socket.emit('subscribe:drivers');
+        console.log('Re-subscribed to drivers channel');
+      }
+    }, 30000);
+
     return () => {
+      clearInterval(reSubscribeInterval);
+      socket.emit('unsubscribe:drivers');
       socket.off("driver:created", handleCreated);
       socket.off("driver:updated", handleUpdated);
       socket.off("driver:deleted", handleDeleted);
     };
   }, [queryClient, searchTerm]);
+
+  // Handle highlight parameter from URL
+  useEffect(() => {
+    const highlightIds = searchParams.get('highlight');
+    if (highlightIds && drivers.length > 0) {
+      const ids = highlightIds.split(',');
+      const highlightedDriver = drivers.find(driver => ids.includes(driver.id));
+      if (highlightedDriver) {
+        // Scroll to the highlighted driver
+        setTimeout(() => {
+          if (highlightedDriverRef.current) {
+            highlightedDriverRef.current.scrollIntoView({ 
+              behavior: 'smooth', 
+              block: 'center' 
+            });
+          }
+        }, 100);
+        
+        // Open trip history for the highlighted driver
+        setSelectedDriver(highlightedDriver);
+        setIsTripHistoryOpen(true);
+        
+        // Clear the highlight parameter from URL after a delay
+        setTimeout(() => {
+          setSearchParams(prev => {
+            prev.delete('highlight');
+            return prev;
+          });
+        }, 2000); // Keep highlight for 2 seconds
+      }
+    }
+  }, [drivers, searchParams, setSearchParams]);
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -125,6 +215,30 @@ export default function Drivers() {
   const handleDeleteDriver = (driver: Driver) => {
     setSelectedDriver(driver);
     setIsDeleteDialogOpen(true);
+  };
+
+  const handleVendorClick = (vendorId: string) => {
+    navigate(`/vendors?highlight=${vendorId}`);
+  };
+
+  const handleViewTripHistory = (driver: Driver) => {
+    setSelectedDriver(driver);
+    setIsTripHistoryOpen(true);
+  };
+
+  const handleCloseTripHistory = () => {
+    setIsTripHistoryOpen(false);
+    setSelectedDriver(null);
+  };
+
+  // Check if a driver is highlighted
+  const isDriverHighlighted = (driverId: string) => {
+    const highlightIds = searchParams.get('highlight');
+    if (highlightIds) {
+      const ids = highlightIds.split(',');
+      return ids.includes(driverId);
+    }
+    return false;
   };
 
   const confirmDelete = () => {
@@ -167,9 +281,17 @@ export default function Drivers() {
         <CardContent>
           <div className="grid gap-4">
             {filteredDrivers.map((driver) => (
-              <div key={driver.id} className="p-4 rounded-lg border border-border hover:bg-accent/30 transition-colors">
+              <div 
+                key={driver.id} 
+                ref={isDriverHighlighted(driver.id) ? highlightedDriverRef : null}
+                className={`p-4 rounded-lg border transition-colors ${
+                  isDriverHighlighted(driver.id) 
+                    ? 'border-primary bg-primary/5 shadow-lg' 
+                    : 'border-border hover:bg-accent/30'
+                }`}
+              >
                 <div className="flex justify-between items-start">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 flex-1">
                     <div className="space-y-1">
                       <p className="font-semibold text-foreground">{driver.name}</p>
                       <p className="text-sm text-muted-foreground">ID: {driver.id}</p>
@@ -188,8 +310,44 @@ export default function Drivers() {
                       <p className="font-medium">{driver.akamaNumber}</p>
                       <p className="text-sm text-success font-semibold">${driver.salary}/month</p>
                     </div>
+                    <div className="space-y-1">
+                      <p className="text-sm text-muted-foreground">Active Vendors</p>
+                      {driver.vendors && driver.vendors.length > 0 ? (
+                        <div className="space-y-1">
+                          {driver.vendors.map((vendor) => (
+                            <Button
+                              key={vendor.id}
+                              variant="link"
+                              size="sm"
+                              className="p-0 h-auto text-primary hover:text-primary/80 text-xs"
+                              onClick={() => handleVendorClick(vendor.id)}
+                            >
+                              <span className="flex items-center gap-1">
+                                {vendor.name}
+                                <ExternalLink className="h-3 w-3" />
+                              </span>
+                            </Button>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">No active vendors</p>
+                      )}
+                      {driver.completedTrips !== undefined && (
+                        <p className="text-xs text-muted-foreground">
+                          {driver.completedTrips} trips completed
+                        </p>
+                      )}
+                    </div>
                   </div>
                   <div className="flex space-x-2">
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => handleViewTripHistory(driver)}
+                      title="View Trip History"
+                    >
+                      <History className="h-4 w-4" />
+                    </Button>
                     <Button 
                       variant="ghost" 
                       size="sm"
@@ -219,6 +377,7 @@ export default function Drivers() {
         isOpen={isFormOpen}
         onClose={() => setIsFormOpen(false)}
         mode={formMode}
+        vendors={vendors}
       />
 
       {/* Delete Confirmation Dialog */}
@@ -230,6 +389,106 @@ export default function Drivers() {
         description={`Are you sure you want to delete ${selectedDriver?.name}? This action cannot be undone.`}
         isLoading={deleteMutation.isPending}
       />
+
+      {/* Trip History Modal */}
+      <Dialog open={isTripHistoryOpen} onOpenChange={setIsTripHistoryOpen}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <History className="h-5 w-5" />
+              Trip History - {selectedDriver?.name}
+            </DialogTitle>
+          </DialogHeader>
+          
+          {isTripHistoryLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="text-muted-foreground">Loading trip history...</div>
+            </div>
+          ) : tripHistory ? (
+            <div className="space-y-6">
+              {/* Trip Statistics */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="text-center p-4 bg-primary/5 rounded-lg">
+                  <p className="text-sm text-muted-foreground">Total Trips</p>
+                  <p className="text-2xl font-bold text-primary">{tripHistory.totalTrips}</p>
+                </div>
+                <div className="text-center p-4 bg-success/5 rounded-lg">
+                  <p className="text-sm text-muted-foreground">Completed</p>
+                  <p className="text-2xl font-bold text-success">{tripHistory.completedTrips}</p>
+                </div>
+                <div className="text-center p-4 bg-warning/5 rounded-lg">
+                  <p className="text-sm text-muted-foreground">Ongoing</p>
+                  <p className="text-2xl font-bold text-warning">{tripHistory.ongoingTrips}</p>
+                </div>
+                <div className="text-center p-4 bg-muted/5 rounded-lg">
+                  <p className="text-sm text-muted-foreground">Pending</p>
+                  <p className="text-2xl font-bold text-muted-foreground">{tripHistory.pendingTrips}</p>
+                </div>
+              </div>
+
+              {/* Trip List */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold">Recent Trips</h3>
+                {tripHistory.trips.length > 0 ? (
+                  <div className="space-y-3">
+                    {tripHistory.trips.map((trip: any) => (
+                      <Card key={trip.id} className="p-4">
+                        <div className="flex justify-between items-start">
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                              <MapPin className="h-4 w-4 text-muted-foreground" />
+                              <span className="font-medium">{trip.startingPlace} → {trip.destination}</span>
+                            </div>
+                            <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                              <div className="flex items-center gap-1">
+                                <Calendar className="h-3 w-3" />
+                                {new Date(trip.tripDate).toLocaleDateString()}
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <DollarSign className="h-3 w-3" />
+                                ${trip.budget?.toLocaleString()}
+                              </div>
+                            </div>
+                            {trip.vendors && trip.vendors.length > 0 && (
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Vendors:</p>
+                                <div className="flex flex-wrap gap-1">
+                                  {trip.vendors.map((vendor: any) => (
+                                    <Badge key={vendor.id} variant="outline" className="text-xs">
+                                      {vendor.name}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          <Badge 
+                            className={
+                              trip.status === 'complete' ? 'bg-success/10 text-success' :
+                              trip.status === 'ongoing' ? 'bg-warning/10 text-warning' :
+                              'bg-muted/10 text-muted-foreground'
+                            }
+                          >
+                            {trip.status}
+                          </Badge>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No trips found for this driver.
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              Failed to load trip history.
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

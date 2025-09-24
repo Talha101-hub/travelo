@@ -34,6 +34,10 @@ const driverSchema = new mongoose.Schema({
     required: [true, 'Driver salary is required'],
     min: [0, 'Salary cannot be negative']
   },
+  vendorIds: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Vendor'
+  }],
   
   // Temporary Details
   driverMeal: {

@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/layout/Layout";
 import Dashboard from "./pages/Dashboard";
 import Drivers from "./pages/Drivers";
+import DriverTempDetails from "./pages/DriverTempDetails";
 import Vendors from "./pages/Vendors";
 import Trips from "./pages/Trips";
 import Maintenance from "./pages/Maintenance";
@@ -34,6 +35,7 @@ const App = () => (
             <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
               <Route index element={<Dashboard />} />
               <Route path="drivers" element={<Drivers />} />
+              <Route path="driver-temp-details" element={<DriverTempDetails />} />
               <Route path="vendors" element={<Vendors />} />
               <Route path="trips" element={<Trips />} />
               <Route path="maintenance" element={<Maintenance />} />

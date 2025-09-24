@@ -15,9 +15,7 @@ interface DriverFormData {
   carModel: string;
   akamaNumber: string;
   driverSalary: number;
-  driverMeal: number;
-  roomRent: number;
-  furtherExpense: number;
+  vendorIds: string[];
   status: "active" | "inactive";
 }
 
@@ -26,18 +24,17 @@ interface DriverFormProps {
   isOpen: boolean;
   onClose: () => void;
   mode: "create" | "edit";
+  vendors?: any[];
 }
 
-export default function DriverForm({ driver, isOpen, onClose, mode }: DriverFormProps) {
+export default function DriverForm({ driver, isOpen, onClose, mode, vendors = [] }: DriverFormProps) {
   const [formData, setFormData] = useState<DriverFormData>({
     name: "",
     carNumber: "",
     carModel: "",
     akamaNumber: "",
     driverSalary: 0,
-    driverMeal: 0,
-    roomRent: 0,
-    furtherExpense: 0,
+    vendorIds: [],
     status: "active"
   });
 
@@ -51,9 +48,7 @@ export default function DriverForm({ driver, isOpen, onClose, mode }: DriverForm
         carModel: driver.carModel || "",
         akamaNumber: driver.akamaNumber || "",
         driverSalary: driver.salary || 0,
-        driverMeal: driver.driverMeal || 0,
-        roomRent: driver.roomRent || 0,
-        furtherExpense: driver.furtherExpense || 0,
+        vendorIds: driver.vendorIds || [],
         status: driver.status || "active"
       });
     } else {
@@ -63,12 +58,26 @@ export default function DriverForm({ driver, isOpen, onClose, mode }: DriverForm
         carModel: "",
         akamaNumber: "",
         driverSalary: 0,
-        roomRent: 0,
-        furtherExpense: 0,
+        vendorIds: [],
         status: "active"
       });
     }
   }, [mode, driver]);
+
+  // Handle driver name change
+  const handleDriverNameChange = (name: string) => {
+    setFormData(prev => ({ ...prev, name }));
+  };
+
+  // Handle vendor selection
+  const handleVendorToggle = (vendorId: string) => {
+    setFormData(prev => ({
+      ...prev,
+      vendorIds: prev.vendorIds.includes(vendorId)
+        ? prev.vendorIds.filter(id => id !== vendorId)
+        : [...prev.vendorIds, vendorId]
+    }));
+  };
 
   const createMutation = useMutation({
     mutationFn: async (data: DriverFormData) => {
@@ -196,6 +205,29 @@ export default function DriverForm({ driver, isOpen, onClose, mode }: DriverForm
                 </div>
                 
                 <div className="space-y-2">
+                  <Label>Linked Vendors *</Label>
+                  <div className="space-y-2 max-h-32 overflow-y-auto border rounded-md p-2">
+                    {vendors.map((vendor) => (
+                      <div key={vendor._id || vendor.id} className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id={`vendor-${vendor._id || vendor.id}`}
+                          checked={formData.vendorIds.includes(vendor._id || vendor.id)}
+                          onChange={() => handleVendorToggle(vendor._id || vendor.id)}
+                          className="rounded border-gray-300"
+                        />
+                        <label htmlFor={`vendor-${vendor._id || vendor.id}`} className="text-sm">
+                          {vendor.name} - {vendor.contactPerson}
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                  {formData.vendorIds.length === 0 && (
+                    <p className="text-sm text-red-500">Please select at least one vendor</p>
+                  )}
+                </div>
+                
+                <div className="space-y-2">
                   <Label htmlFor="status">Status</Label>
                   <Select value={formData.status} onValueChange={(value) => handleChange("status", value)}>
                     <SelectTrigger>
@@ -210,48 +242,6 @@ export default function DriverForm({ driver, isOpen, onClose, mode }: DriverForm
               </div>
             </div>
 
-            {/* Temporary Details */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold">Temporary Expenses</h3>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="driverMeal">Meal Expenses</Label>
-                  <Input
-                    id="driverMeal"
-                    type="number"
-                    value={formData.driverMeal}
-                    onChange={(e) => handleChange("driverMeal", parseFloat(e.target.value) || 0)}
-                    placeholder="200"
-                    min="0"
-                  />
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="roomRent">Room Rent</Label>
-                  <Input
-                    id="roomRent"
-                    type="number"
-                    value={formData.roomRent}
-                    onChange={(e) => handleChange("roomRent", parseFloat(e.target.value) || 0)}
-                    placeholder="500"
-                    min="0"
-                  />
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="furtherExpense">Further Expenses</Label>
-                  <Input
-                    id="furtherExpense"
-                    type="number"
-                    value={formData.furtherExpense}
-                    onChange={(e) => handleChange("furtherExpense", parseFloat(e.target.value) || 0)}
-                    placeholder="100"
-                    min="0"
-                  />
-                </div>
-              </div>
-            </div>
 
             {/* Form Actions */}
             <div className="flex justify-end space-x-2 pt-4">

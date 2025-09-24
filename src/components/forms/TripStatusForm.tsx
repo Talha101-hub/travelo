@@ -31,8 +31,12 @@ export default function TripStatusForm({ trip, isOpen, onClose }: TripStatusForm
       });
       return res.data;
     },
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["trips"] });
+      // If trip is completed, also refresh drivers data
+      if (variables === "complete") {
+        queryClient.invalidateQueries({ queryKey: ["drivers"] });
+      }
       toast.success("Trip status updated successfully");
       onClose();
     },

@@ -14,8 +14,10 @@ import {
   Wrench, 
   Calendar as CalendarIcon,
   Download,
-  Filter
+  Filter,
+  ExternalLink
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import api from "@/lib/api";
 import { format } from "date-fns";
@@ -58,6 +60,7 @@ export default function Reports() {
     to: undefined
   });
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const navigate = useNavigate();
 
   const { data: dashboardData, isLoading: isDashboardLoading } = useQuery<DashboardData>({
     queryKey: ["dashboard-data"],
@@ -85,11 +88,35 @@ export default function Reports() {
     staleTime: 30_000,
   });
 
+  const { data: driverTempDetails = [] } = useQuery({
+    queryKey: ["driver-temp-details"],
+    queryFn: async () => {
+      const res = await api.get("/driver-temp-details");
+      return res.data.data || [];
+    },
+  });
+
+  const { data: maintenanceData = [] } = useQuery({
+    queryKey: ["maintenance"],
+    queryFn: async () => {
+      const res = await api.get("/maintenance");
+      return res.data.data || [];
+    },
+  });
+
   const handlePeriodChange = (value: string) => {
     setPeriod(value);
     if (value !== "custom") {
       setDateRange({ from: undefined, to: undefined });
     }
+  };
+
+  const handleDriverTempDetailsClick = () => {
+    navigate("/driver-temp-details");
+  };
+
+  const handleMaintenanceClick = () => {
+    navigate("/maintenance");
   };
 
   const exportReport = () => {
@@ -177,12 +204,12 @@ export default function Reports() {
   const data = reportData ? {
     totalTrips: reportData.trips?.totalTrips || 0,
     totalRevenue: reportData.revenue?.totalRevenue || 0,
-    totalExpense: (reportData.expenses?.driverExpenses?.totalTempExpenses || 0) + (reportData.expenses?.maintenanceExpenses?.totalMaintenanceCost || 0),
-    netProfit: (reportData.revenue?.totalRevenue || 0) - ((reportData.expenses?.driverExpenses?.totalTempExpenses || 0) + (reportData.expenses?.maintenanceExpenses?.totalMaintenanceCost || 0)),
+    totalExpense: (reportData.expenses?.driverExpenses?.totalSalary || 0) + (reportData.expenses?.driverTempExpenses?.totalTempExpenses || 0) + (reportData.expenses?.maintenanceExpenses?.totalMaintenanceCost || 0),
+    netProfit: (reportData.revenue?.totalRevenue || 0) - ((reportData.expenses?.driverExpenses?.totalSalary || 0) + (reportData.expenses?.driverTempExpenses?.totalTempExpenses || 0) + (reportData.expenses?.maintenanceExpenses?.totalMaintenanceCost || 0)),
     totalDrivers: reportData.drivers?.totalDrivers || 0,
     totalVendors: reportData.vendors?.totalVendors || 0,
     totalMaintenance: reportData.maintenance?.totalMaintenance || 0,
-    maintenanceCost: reportData.maintenance?.totalCost || 0,
+    maintenanceCost: reportData.expenses?.maintenanceExpenses?.totalMaintenanceCost || 0,
     completedTrips: reportData.trips?.completedTrips || 0,
     pendingTrips: reportData.trips?.pendingTrips || 0,
     ongoingTrips: reportData.trips?.ongoingTrips || 0,
@@ -465,6 +492,115 @@ export default function Reports() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Expense Analysis Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Driver Temporary Expenses Chart */}
+        <Card className="shadow-card">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center space-x-2">
+                <Users className="h-5 w-5" />
+                <span>Driver Temporary Expenses</span>
+              </CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDriverTempDetailsClick}
+                className="flex items-center gap-1"
+              >
+                View Details
+                <ExternalLink className="h-3 w-3" />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {driverTempDetails.length > 0 ? (
+                <>
+                  <div className="space-y-2">
+                    {driverTempDetails.slice(0, 5).map((detail: any, index: number) => (
+                      <div key={detail._id} className="flex items-center justify-between p-2 bg-muted/50 rounded">
+                        <div className="flex items-center space-x-2">
+                          <div className="w-3 h-3 rounded-full bg-primary"></div>
+                          <span className="text-sm font-medium">{detail.driverName}</span>
+                        </div>
+                        <span className="text-sm font-bold text-primary">${detail.totalExpense}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="pt-2 border-t">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">Total Driver Temp Expenses</span>
+                      <span className="text-lg font-bold text-primary">
+                        ${driverTempDetails.reduce((sum: number, detail: any) => sum + (detail.totalExpense || 0), 0).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p>No driver temporary expenses data available</p>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Car Maintenance Chart */}
+        <Card className="shadow-card">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center space-x-2">
+                <Wrench className="h-5 w-5" />
+                <span>Car Maintenance Costs</span>
+              </CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleMaintenanceClick}
+                className="flex items-center gap-1"
+              >
+                View Details
+                <ExternalLink className="h-3 w-3" />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {maintenanceData.length > 0 ? (
+                <>
+                  <div className="space-y-2">
+                    {maintenanceData.slice(0, 5).map((maintenance: any, index: number) => (
+                      <div key={maintenance._id} className="flex items-center justify-between p-2 bg-muted/50 rounded">
+                        <div className="flex items-center space-x-2">
+                          <div className="w-3 h-3 rounded-full bg-destructive"></div>
+                          <span className="text-sm font-medium">{maintenance.carNumber}</span>
+                        </div>
+                        <span className="text-sm font-bold text-destructive">${maintenance.cost}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="pt-2 border-t">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">Total Maintenance Cost</span>
+                      <span className="text-lg font-bold text-destructive">
+                        ${maintenanceData.reduce((sum: number, maintenance: any) => sum + (maintenance.cost || 0), 0).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Wrench className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p>No maintenance data available</p>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

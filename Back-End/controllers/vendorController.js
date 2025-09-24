@@ -1,4 +1,6 @@
 const Vendor = require('../models/Vendor');
+const Driver = require('../models/Driver');
+const Trip = require('../models/Trip');
 const { validationResult } = require('express-validator');
 
 // @desc    Get all vendors
@@ -27,10 +29,30 @@ const getVendors = async (req, res) => {
       .sort({ createdAt: -1 })
       .select('-__v');
 
+    // Calculate statistics for each vendor
+    const vendorsWithStats = await Promise.all(
+      vendors.map(async (vendor) => {
+        // Get trips for this vendor
+        const trips = await Trip.find({ vendors: vendor._id });
+        const completedTrips = trips.filter(trip => trip.status === 'complete').length;
+        const ongoingTrips = trips.filter(trip => trip.status === 'ongoing').length;
+        
+        // Get linked drivers for this vendor
+        const linkedDrivers = await Driver.find({ vendorIds: vendor._id });
+        
+        return {
+          ...vendor.toObject(),
+          completedTrips,
+          ongoingTrips,
+          linkedDrivers: linkedDrivers.length
+        };
+      })
+    );
+
     res.status(200).json({
       success: true,
-      count: vendors.length,
-      data: vendors
+      count: vendorsWithStats.length,
+      data: vendorsWithStats
     });
   } catch (error) {
     console.error('Error fetching vendors:', error);
@@ -300,6 +322,101 @@ const getVendorStats = async (req, res) => {
   }
 };
 
+// @desc    Get vendor trip history
+// @route   GET /api/vendors/:id/trips
+// @access  Public
+const getVendorTripHistory = async (req, res) => {
+  try {
+    const vendor = await Vendor.findById(req.params.id);
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor not found'
+      });
+    }
+
+    // Get all trips for this vendor
+    const trips = await Trip.find({ vendors: req.params.id })
+      .populate('driver', 'name carNumber akamaNumber')
+      .sort({ createdAt: -1 })
+      .select('-__v');
+
+    // Calculate trip statistics
+    const totalTrips = trips.length;
+    const completedTrips = trips.filter(trip => trip.status === 'complete').length;
+    const ongoingTrips = trips.filter(trip => trip.status === 'ongoing').length;
+    const pendingTrips = trips.filter(trip => trip.status === 'pending').length;
+
+    // Calculate total revenue from completed trips
+    const totalRevenue = trips
+      .filter(trip => trip.status === 'complete')
+      .reduce((sum, trip) => sum + (trip.budget || 0), 0);
+
+    // Get unique drivers who worked with this vendor
+    const uniqueDrivers = [...new Set(trips.map(trip => trip.driver?._id?.toString()).filter(Boolean))];
+    const driverCount = uniqueDrivers.length;
+
+    // Group trips by driver for better display
+    const tripsByDriver = trips.reduce((acc, trip) => {
+      const driverId = trip.driver?._id?.toString();
+      if (driverId) {
+        if (!acc[driverId]) {
+          acc[driverId] = {
+            driver: trip.driver,
+            trips: []
+          };
+        }
+        acc[driverId].trips.push(trip);
+      }
+      return acc;
+    }, {});
+
+    res.json({
+      success: true,
+      data: {
+        vendor: {
+          _id: vendor._id,
+          name: vendor.name,
+          email: vendor.email,
+          phone: vendor.phone
+        },
+        statistics: {
+          totalTrips,
+          completedTrips,
+          ongoingTrips,
+          pendingTrips,
+          totalRevenue,
+          driverCount
+        },
+        trips: trips.map(trip => ({
+          _id: trip._id,
+          startingPlace: trip.startingPlace,
+          destination: trip.destination,
+          budget: trip.budget,
+          tripDate: trip.tripDate,
+          status: trip.status,
+          carNumber: trip.carNumber,
+          driver: trip.driver ? {
+            _id: trip.driver._id,
+            name: trip.driver.name,
+            carNumber: trip.driver.carNumber,
+            akamaNumber: trip.driver.akamaNumber
+          } : null,
+          createdAt: trip.createdAt
+        })),
+        tripsByDriver: Object.values(tripsByDriver)
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching vendor trip history:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   getVendors,
   getVendor,
@@ -307,5 +424,6 @@ module.exports = {
   updateVendor,
   deleteVendor,
   updateVendorPayment,
-  getVendorStats
+  getVendorStats,
+  getVendorTripHistory
 };

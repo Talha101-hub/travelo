@@ -1,4 +1,5 @@
 const Driver = require('../models/Driver');
+const Trip = require('../models/Trip');
 const { validationResult } = require('express-validator');
 
 // @desc    Get all drivers
@@ -24,13 +25,53 @@ const getDrivers = async (req, res) => {
     }
 
     const drivers = await Driver.find(query)
+      .populate('vendorIds', 'name contactPerson')
       .sort({ createdAt: -1 })
       .select('-__v');
 
+    // Add completed trips count and active vendors for each driver
+    const driversWithStats = await Promise.all(
+      drivers.map(async (driver) => {
+        const completedTrips = await Trip.countDocuments({
+          driver: driver._id,
+          status: 'complete'
+        });
+
+        // Get vendors with ongoing or scheduled trips for this driver
+        const activeTrips = await Trip.find({
+          driver: driver._id,
+          status: { $in: ['ongoing', 'pending'] }
+        }).populate('vendors', 'name contactPerson');
+
+        // Extract unique vendors from active trips
+        const activeVendors = [];
+        const vendorIds = new Set();
+        
+        activeTrips.forEach(trip => {
+          trip.vendors.forEach(vendor => {
+            if (!vendorIds.has(vendor._id.toString())) {
+              vendorIds.add(vendor._id.toString());
+              activeVendors.push({
+                _id: vendor._id,
+                name: vendor.name,
+                contactPerson: vendor.contactPerson
+              });
+            }
+          });
+        });
+
+        return {
+          ...driver.toObject(),
+          completedTrips,
+          activeVendors // Only vendors with ongoing/scheduled trips
+        };
+      })
+    );
+
     res.status(200).json({
       success: true,
-      count: drivers.length,
-      data: drivers
+      count: driversWithStats.length,
+      data: driversWithStats
     });
   } catch (error) {
     console.error('Error fetching drivers:', error);
@@ -47,7 +88,9 @@ const getDrivers = async (req, res) => {
 // @access  Public
 const getDriver = async (req, res) => {
   try {
-    const driver = await Driver.findById(req.params.id).select('-__v');
+    const driver = await Driver.findById(req.params.id)
+      .populate('vendorIds', 'name contactPerson')
+      .select('-__v');
 
     if (!driver) {
       return res.status(404).json({
@@ -56,9 +99,20 @@ const getDriver = async (req, res) => {
       });
     }
 
+    // Get trip count for this driver
+    const completedTrips = await Trip.countDocuments({ 
+      driver: req.params.id, 
+      status: 'complete' 
+    });
+
+    const driverWithStats = {
+      ...driver.toObject(),
+      completedTrips
+    };
+
     res.status(200).json({
       success: true,
-      data: driver
+      data: driverWithStats
     });
   } catch (error) {
     console.error('Error fetching driver:', error);
@@ -270,11 +324,69 @@ const getDriverStats = async (req, res) => {
   }
 };
 
+// @desc    Get driver trip history
+// @route   GET /api/drivers/:id/trips
+// @access  Public
+const getDriverTripHistory = async (req, res) => {
+  try {
+    const driver = await Driver.findById(req.params.id);
+    
+    if (!driver) {
+      return res.status(404).json({
+        success: false,
+        message: 'Driver not found'
+      });
+    }
+
+    // Get all trips for this driver with vendor information
+    const trips = await Trip.find({ driver: req.params.id })
+      .populate('vendors', 'name contactPerson')
+      .sort({ createdAt: -1 })
+      .select('-__v');
+
+    // Group trips by status
+    const tripHistory = {
+      totalTrips: trips.length,
+      completedTrips: trips.filter(trip => trip.status === 'complete').length,
+      ongoingTrips: trips.filter(trip => trip.status === 'ongoing').length,
+      pendingTrips: trips.filter(trip => trip.status === 'pending').length,
+      trips: trips.map(trip => ({
+        id: trip._id,
+        startingPlace: trip.startingPlace,
+        destination: trip.destination,
+        budget: trip.budget,
+        actualCost: trip.actualCost,
+        status: trip.status,
+        tripDate: trip.tripDate,
+        createdAt: trip.createdAt,
+        vendors: trip.vendors.map(vendor => ({
+          id: vendor._id,
+          name: vendor.name,
+          contactPerson: vendor.contactPerson
+        }))
+      }))
+    };
+
+    res.status(200).json({
+      success: true,
+      data: tripHistory
+    });
+  } catch (error) {
+    console.error('Error fetching driver trip history:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching driver trip history',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   getDrivers,
   getDriver,
   createDriver,
   updateDriver,
   deleteDriver,
-  getDriverStats
+  getDriverStats,
+  getDriverTripHistory
 };

@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, MapPin, Calendar, User, Car, Search, Edit, Trash2, Settings } from "lucide-react";
+import { Plus, MapPin, Calendar, User, Car, Search, Edit, Trash2, Settings, ExternalLink } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import api from "@/lib/api";
 import { getSocket } from "@/lib/socket";
@@ -20,7 +22,8 @@ interface Trip {
   tripDate: string;
   driver: string;
   driverName: string;
-  vendor: string;
+  driverId?: string;
+  vendors: Array<{ id: string; name: string; contactPerson: string }>;
   carNumber: string;
   status: "pending" | "ongoing" | "complete";
 }
@@ -32,7 +35,10 @@ export default function Trips() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const highlightedTripRef = useRef<HTMLDivElement>(null);
   const { data: trips = [] } = useQuery<Trip[]>({
     queryKey: ["trips", { search: searchTerm }],
     queryFn: async () => {
@@ -45,7 +51,8 @@ export default function Trips() {
         tripDate: t.tripDate,
         driver: t.driver?.name || "-",
         driverName: t.driver?.name || "-",
-        vendor: t.vendor?.name || "-",
+        driverId: t.driver?._id,
+        vendors: t.vendors || [],
         carNumber: t.carNumber || "-",
         status: t.status,
       }));
@@ -91,6 +98,14 @@ export default function Trips() {
     setIsDeleteDialogOpen(true);
   };
 
+  const handleDriverClick = (driverId: string) => {
+    navigate(`/drivers?highlight=${driverId}`);
+  };
+
+  const handleVendorClick = (vendorId: string) => {
+    navigate(`/vendors?highlight=${vendorId}`);
+  };
+
   const confirmDelete = () => {
     if (selectedTrip) {
       deleteMutation.mutate(selectedTrip.id);
@@ -108,7 +123,7 @@ export default function Trips() {
         tripDate: trip.tripDate,
         driver: trip.driver?.name || "-",
         driverName: trip.driver?.name || "-",
-        vendor: trip.vendor?.name || "-",
+        vendors: trip.vendors || [],
         carNumber: trip.carNumber || "-",
         status: trip.status,
       };
@@ -133,6 +148,44 @@ export default function Trips() {
       socket.off("trip:deleted", remove);
     };
   }, [queryClient]);
+
+  // Handle highlight parameter from URL
+  useEffect(() => {
+    const highlightIds = searchParams.get('highlight');
+    if (highlightIds && trips.length > 0) {
+      const ids = highlightIds.split(',');
+      const highlightedTrip = trips.find(trip => ids.includes(trip.id));
+      if (highlightedTrip) {
+        // Scroll to the highlighted trip
+        setTimeout(() => {
+          if (highlightedTripRef.current) {
+            highlightedTripRef.current.scrollIntoView({ 
+              behavior: 'smooth', 
+              block: 'center' 
+            });
+          }
+        }, 100);
+        
+        // Clear the highlight parameter from URL after a delay
+        setTimeout(() => {
+          setSearchParams(prev => {
+            prev.delete('highlight');
+            return prev;
+          });
+        }, 2000); // Keep highlight for 2 seconds
+      }
+    }
+  }, [trips, searchParams, setSearchParams]);
+
+  // Check if a trip is highlighted
+  const isTripHighlighted = (tripId: string) => {
+    const highlightIds = searchParams.get('highlight');
+    if (highlightIds) {
+      const ids = highlightIds.split(',');
+      return ids.includes(tripId);
+    }
+    return false;
+  };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -180,7 +233,15 @@ export default function Trips() {
 
       <div className="grid gap-6">
         {trips.map((trip) => (
-          <Card key={trip.id} className="shadow-card hover:shadow-elegant transition-shadow">
+          <Card 
+            key={trip.id} 
+            ref={isTripHighlighted(trip.id) ? highlightedTripRef : null}
+            className={`shadow-card transition-shadow ${
+              isTripHighlighted(trip.id) 
+                ? 'border-primary bg-primary/5 shadow-lg' 
+                : 'hover:shadow-elegant'
+            }`}
+          >
             <CardHeader>
               <div className="flex justify-between items-start">
                 <CardTitle className="flex items-center space-x-2">
@@ -232,8 +293,41 @@ export default function Trips() {
                     <User className="h-4 w-4" />
                     <span className="text-sm">Driver & Vendor</span>
                   </div>
-                  <p className="font-medium">{trip.driver}</p>
-                  <p className="text-sm text-muted-foreground">{trip.vendor}</p>
+                  {trip.driverId ? (
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="p-0 h-auto text-primary hover:text-primary/80 font-medium"
+                      onClick={() => handleDriverClick(trip.driverId!)}
+                    >
+                      <span className="flex items-center gap-1">
+                        {trip.driver}
+                        <ExternalLink className="h-3 w-3" />
+                      </span>
+                    </Button>
+                  ) : (
+                    <p className="font-medium text-muted-foreground">{trip.driver}</p>
+                  )}
+                  {trip.vendors && trip.vendors.length > 0 ? (
+                    <div className="space-y-1">
+                      {trip.vendors.map((vendor) => (
+                        <Button
+                          key={vendor.id}
+                          variant="link"
+                          size="sm"
+                          className="p-0 h-auto text-primary hover:text-primary/80 text-xs"
+                          onClick={() => handleVendorClick(vendor.id)}
+                        >
+                          <span className="flex items-center gap-1">
+                            {vendor.name}
+                            <ExternalLink className="h-3 w-3" />
+                          </span>
+                        </Button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No vendors assigned</p>
+                  )}
                 </div>
                 
                 <div className="space-y-2">

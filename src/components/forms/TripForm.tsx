@@ -15,7 +15,7 @@ interface TripFormData {
   budget: number;
   tripDate: string;
   driver: string;
-  vendor: string;
+  vendors: string[];
   carNumber: string;
   status: "pending" | "ongoing" | "complete";
 }
@@ -34,7 +34,7 @@ export default function TripForm({ trip, isOpen, onClose, mode }: TripFormProps)
     budget: 0,
     tripDate: "",
     driver: "",
-    vendor: "",
+    vendors: [],
     carNumber: "",
     status: "pending"
   });
@@ -66,7 +66,7 @@ export default function TripForm({ trip, isOpen, onClose, mode }: TripFormProps)
         budget: trip.budget || 0,
         tripDate: trip.tripDate ? new Date(trip.tripDate).toISOString().split('T')[0] : "",
         driver: trip.driver?._id || trip.driver || "",
-        vendor: trip.vendor?._id || trip.vendor || "",
+        vendors: trip.vendors?.map((v: any) => v._id || v) || [],
         carNumber: trip.carNumber || "",
         status: trip.status || "pending"
       });
@@ -77,12 +77,36 @@ export default function TripForm({ trip, isOpen, onClose, mode }: TripFormProps)
         budget: 0,
         tripDate: "",
         driver: "",
-        vendor: "",
+        vendors: [],
         carNumber: "",
         status: "pending"
       });
     }
   }, [mode, trip]);
+
+  // Auto-fill car number when driver is selected
+  const handleDriverChange = (driverId: string) => {
+    setFormData(prev => ({ ...prev, driver: driverId }));
+    
+    // Find driver and auto-fill car number
+    const selectedDriver = drivers.find((d: any) => d._id === driverId || d.id === driverId);
+    if (selectedDriver) {
+      setFormData(prev => ({ 
+        ...prev, 
+        carNumber: selectedDriver.carNumber || ""
+      }));
+    }
+  };
+
+  // Handle vendor selection
+  const handleVendorToggle = (vendorId: string) => {
+    setFormData(prev => ({
+      ...prev,
+      vendors: prev.vendors.includes(vendorId)
+        ? prev.vendors.filter(id => id !== vendorId)
+        : [...prev.vendors, vendorId]
+    }));
+  };
 
   const createMutation = useMutation({
     mutationFn: async (data: TripFormData) => {
@@ -104,8 +128,12 @@ export default function TripForm({ trip, isOpen, onClose, mode }: TripFormProps)
       const res = await api.put(`/trips/${trip.id}`, data);
       return res.data;
     },
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["trips"] });
+      // If trip is updated to complete status, also refresh drivers data
+      if (variables.status === "complete") {
+        queryClient.invalidateQueries({ queryKey: ["drivers"] });
+      }
       toast.success("Trip updated successfully");
       onClose();
     },
@@ -207,7 +235,7 @@ export default function TripForm({ trip, isOpen, onClose, mode }: TripFormProps)
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="driver">Driver *</Label>
-                  <Select value={formData.driver} onValueChange={(value) => handleChange("driver", value)}>
+                  <Select value={formData.driver} onValueChange={handleDriverChange}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select a driver" />
                     </SelectTrigger>
@@ -222,19 +250,26 @@ export default function TripForm({ trip, isOpen, onClose, mode }: TripFormProps)
                 </div>
                 
                 <div className="space-y-2">
-                  <Label htmlFor="vendor">Vendor *</Label>
-                  <Select value={formData.vendor} onValueChange={(value) => handleChange("vendor", value)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select a vendor" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {vendors.map((vendor: any) => (
-                        <SelectItem key={vendor._id} value={vendor._id}>
-                          {vendor.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Label>Vendors *</Label>
+                  <div className="space-y-2 max-h-32 overflow-y-auto border rounded-md p-2">
+                    {vendors.map((vendor: any) => (
+                      <div key={vendor._id || vendor.id} className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id={`trip-vendor-${vendor._id || vendor.id}`}
+                          checked={formData.vendors.includes(vendor._id || vendor.id)}
+                          onChange={() => handleVendorToggle(vendor._id || vendor.id)}
+                          className="rounded border-gray-300"
+                        />
+                        <label htmlFor={`trip-vendor-${vendor._id || vendor.id}`} className="text-sm">
+                          {vendor.name} - {vendor.contactPerson}
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                  {formData.vendors.length === 0 && (
+                    <p className="text-sm text-red-500">Please select at least one vendor</p>
+                  )}
                 </div>
                 
                 <div className="space-y-2">
